@@ -1,20 +1,44 @@
 const jwt = require('jsonwebtoken');
 
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-  if (!token) {
-    return res.status(401).json({ success: false, message: 'Access token required' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ success: false, message: 'Invalid or expired token' });
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Access token required' 
+      });
     }
-    req.user = user;
-    next();
-  });
+
+    jwt.verify(token, process.env.JWT_SECRET, {
+      issuer: 'your-app-name',
+      audience: 'your-app-users'
+    }, (err, decoded) => {
+      if (err) {
+        if (err.name === 'TokenExpiredError') {
+          return res.status(401).json({ 
+            success: false,
+            message: 'Token expired. Please login again.' 
+          });
+        }
+        return res.status(403).json({ 
+          success: false,
+          message: 'Invalid token' 
+        });
+      }
+
+      req.user = decoded;
+      next();
+    });
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    return res.status(500).json({ 
+      success: false,
+      message: 'Authentication error' 
+    });
+  }
 };
 
 module.exports = { authenticateToken };

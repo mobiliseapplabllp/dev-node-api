@@ -1,33 +1,210 @@
-// controllers/userController.js
 const db = require('../config/db');
 
-// Get all users
-exports.getUsers = (req, res) => {
-  db.query('SELECT * FROM users', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-};
+const userController = {
+  addUser: (req, res) => {
+    try {
+      const { username, email, password, dob, mobile } = req.body;
+      
+      if (!username || !email || !password) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Username, email, and password are required' 
+        });
+      }
 
-// Get one user by ID
-exports.getUserById = (req, res) => {
-  const { id } = req.params;
-  db.query('SELECT * FROM users WHERE id = ?', [id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ message: 'User not found' });
-    res.json(results[0]);
-  });
-};
-
-// Create a new user
-exports.createUser = (req, res) => {
-  const { name, email } = req.body;
-  db.query(
-    'INSERT INTO users (name, email) VALUES (?, ?)',
-    [name, email],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ id: result.insertId, name, email });
+      const sql = 'INSERT INTO `user` (`username`,`email`,`password`,`dob`,`mobile`) VALUES (?,?,?,?,?)';
+      
+      db.query(sql, [username, email, password, dob, mobile], (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          
+          if (err.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ 
+              success: false, 
+              message: 'Username or email already exists' 
+            });
+          }
+          
+          return res.status(500).json({ 
+            success: false, 
+            message: 'Database error' 
+          });
+        }
+        
+        res.status(201).json({ 
+          success: true, 
+          message: 'User added successfully!',
+          userId: result.insertId 
+        });
+      });
+    } catch (error) {
+      console.error('Add user error:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Server error' 
+      });
     }
-  );
+  },
+
+  getAllUsers: (req, res) => {
+    try {
+      const { username } = req.body;       
+
+      if (!username) {
+        return res.status(400).json({
+          success: false,
+          message: 'Username is required'
+        });
+      }
+
+      const sql = `
+        SELECT *FROM user WHERE username = ?
+      `;
+
+      db.query(sql, [username], (err, results) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({
+            success: false,
+            message: 'Database error'
+          });
+        }
+
+        if (results.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: 'User not found'
+          });
+        }
+
+        res.json({
+          success: true,
+          user: results[0]
+        });
+      });
+    } catch (error) {
+      console.error('Server error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error'
+      });
+    }
+  },
+
+
+
+  getUserProfile: (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const sql = 'SELECT userId, username, name, email, status, dob, mobile FROM user WHERE userId = ?';
+      
+      db.query(sql, [userId], (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ 
+            success: false, 
+            message: 'Database error' 
+          });
+        }
+        
+        if (result.length > 0) {
+          res.json({ 
+            success: true, 
+            user: result[0] 
+          });
+        } else {
+          res.status(404).json({ 
+            success: false, 
+            message: 'User not found' 
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Get profile error:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Server error' 
+      });
+    }
+  },
+
+  getUserById: (req, res) => {
+    try {
+      const { id } = req.params;
+      const sql = 'SELECT userId, username, name, email, status, dob, mobile FROM user WHERE userId = ?';
+      
+      db.query(sql, [id], (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ 
+            success: false, 
+            message: 'Database error' 
+          });
+        }
+        
+        if (result.length > 0) {
+          res.json({ 
+            success: true, 
+            user: result[0] 
+          });
+        } else {
+          res.status(404).json({ 
+            success: false, 
+            message: 'User not found' 
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Get user by ID error:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Server error' 
+      });
+    }
+  },
+  updatePassword: (req, res) => {
+    try {
+      const { userId, newPassword } = req.body;
+  
+      if (!userId || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'User ID and new password are required'
+        });
+      }
+  
+      const sql = 'UPDATE user SET password = ? WHERE userId = ?';
+  
+      db.query(sql, [newPassword, userId], (err, result) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({
+            success: false,
+            message: 'Database error'
+          });
+        }
+  
+        if (result.affectedRows > 0) {
+          res.json({
+            success: true,
+            message: 'Password updated successfully'
+          });
+        } else {
+          res.status(404).json({
+            success: false,
+            message: 'User not found'
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Update password error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error'
+      });
+    }
+  },
+  
 };
+
+module.exports = userController;

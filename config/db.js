@@ -16,4 +16,4 @@ db.connect((err) => {
   console.log('✅ Connected to MySQL database');
 });
 
-module.exports = db; // Fixed: was "module. Exports"
+module.exports = db;

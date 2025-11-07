@@ -1,127 +1,103 @@
 const express = require('express');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const db = require('./config/db');
-const { authenticateToken } = require('./middleware/auth');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
-// Enable CORS for Angular frontend
-app.use(cors({
-  origin: 'http://localhost:4200', // Angular default port
-  credentials: true
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
 }));
 
-app.use(express.json());
+// CORS configuration
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:4200',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-// Login user 
-app.post('/login', (req, res) => {
-  let { username, password } = req.body;
-  username = String(username);
-  const sql = 'SELECT * FROM user WHERE username = ? AND password = ?';
-  
-  db.query(sql, [username, password], (err, result) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ success: false, message: 'Database error' });
-    }
-    
-    if (result.length > 0) {
-      const user = result[0];
-      
-      // Generate JWT token
-      const token = jwt.sign(
-        { 
-          userName: user.username, 
-          name: user.name,
-          email: user.email 
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN }
-      );
-      
-      // Send response with token
-      res.json({ 
-        success: true, 
-        user: {
-          userName: user.username,
-          name: user.name,
-          email: user.email,
-          userId: user.userid,
-          status : user.status,
-          dob: user.dob
-        },
-        token: token,
-        expiresIn: process.env.JWT_EXPIRES_IN
-      });
-    } else {
-      res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-  });
+// Rate limiting for all requests
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: {
+    success: false,
+    message: 'Too many requests, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// Insert user (public for now - you can protect this later)
-app.post('/addUser', (req, res) => {
-  const { username, email, password, dob, mobile } = req.body;
-  const sql = 'INSERT INTO `user` (`username`,`email`,`password`,`dob`,`mobile`) VALUES (?,?,?,?,?)';
-
-  
-  db.query(sql, [username, email, password, dob, mobile], (err, result) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ success: false, message: 'Database error' });
-    }
-    res.json({ success: true, message: 'User added successfully!' });
-  });
+// Strict rate limiting for auth routes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 login attempts per windowMs
+  skipSuccessfulRequests: false,
+  message: {
+    success: false,
+    message: 'Too many login attempts. Please try again after 15 minutes.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// Get all users (Protected route)
-app.get('/users', authenticateToken, (req, res) => {
-  db.query('SELECT userId, name, email FROM user', (err, results) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ success: false, message: 'Database error' });
-    }
-    res.json({ success: true, users: results });
-  });
-});
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Get user profile (Protected route)
-app.get('/profile', authenticateToken, (req, res) => {
-  const userId = req.user.userId;
-  const sql = 'SELECT userId, name, email FROM user WHERE userId = ?';
-  
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      console.error('Database error:', err);
-      return res.status(500).json({ success: false, message: 'Database error' });
-    }
-    
-    if (result.length > 0) {
-      res.json({ success: true, user: result[0] });
-    } else {
-      res.status(404).json({ success: false, message: 'User not found' });
-    }
-  });
-});
+// Apply rate limiters
+app.use('/api/', generalLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/login', authLimiter);
 
-// Verify token endpoint
-app.post('/verify-token', authenticateToken, (req, res) => {
-  res.json({ 
-    success: true, 
-    message: 'Token is valid',
-    user: req.user 
-  });
-});
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 
-// Health check endpoint
+// Backward compatibility routes
+app.use('/', authRoutes);  
+app.use('/', userRoutes);  
+
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'Server is running!' });
+  res.json({ 
+    status: 'Server is running!',
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Start server
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  res.status(err.status || 500).json({ 
+    success: false, 
+    message: isDevelopment ? err.message : 'Internal server error',
+    ...(isDevelopment && { stack: err.stack })
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false, 
+    message: 'Route not found' 
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🔒 Security features enabled`);
+  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+module.exports = app;
