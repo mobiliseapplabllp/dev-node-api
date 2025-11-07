@@ -3,8 +3,9 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const { authenticateToken } = require('../middleware/auth');
+const { validateUserRegistration } = require('../middleware/validation');
 
-router.post('/addUser', userController.addUser);
+router.post('/addUser', validateUserRegistration, userController.addUser);
 
 router.post('/getAllUsers', authenticateToken, userController.getAllUsers);
 

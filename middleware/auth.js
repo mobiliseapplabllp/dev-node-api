@@ -13,8 +13,8 @@ const authenticateToken = (req, res, next) => {
     }
 
     jwt.verify(token, process.env.JWT_SECRET, {
-      issuer: 'your-app-name',
-      audience: 'your-app-users'
+      issuer: process.env.JWT_ISSUER || 'your-app-name',
+      audience: process.env.JWT_AUDIENCE || 'your-app-users'
     }, (err, decoded) => {
       if (err) {
         if (err.name === 'TokenExpiredError') {
