@@ -4,7 +4,7 @@ const { promisePool } = require('../config/db');
 const userController = {
   addUser: async (req, res) => {
     try {
-      const { username, email, password, dob, mobile } = req.body;
+      const { username, email, password, dob, mobile, role } = req.body;
       
       // Input validation
       if (!username || !email || !password) {
@@ -13,14 +13,15 @@ const userController = {
           message: 'Username, email, and password are required' 
         });
       }
-
+  
       // Sanitize inputs
       const sanitizedUsername = String(username).trim();
       const sanitizedEmail = String(email).trim().toLowerCase();
       const sanitizedPassword = String(password);
       const sanitizedDob = dob ? String(dob).trim() : null;
-      const sanitizedPhone = mobile ? String(mobile).trim() : null; // Note: database column is 'phone' not 'mobile'
-
+      const sanitizedPhone = mobile ? String(mobile).trim() : null;
+      const sanitizedRole = role ? String(role).trim() : 'user'; // Default to 'user' if not provided
+  
       // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(sanitizedEmail)) {
@@ -29,7 +30,7 @@ const userController = {
           message: 'Invalid email format' 
         });
       }
-
+  
       // Validate password strength
       if (sanitizedPassword.length < 6) {
         return res.status(400).json({ 
@@ -37,20 +38,21 @@ const userController = {
           message: 'Password must be at least 6 characters long' 
         });
       }
-
+  
       // Hash password before storing
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(sanitizedPassword, saltRounds);
-
-      // Note: Database column is 'phone' not 'mobile'
-      const sql = 'INSERT INTO `user` (`username`,`email`,`password`,`dob`,`phone`) VALUES (?,?,?,?,?)';
+  
+      // Check if role column exists, if not, don't include it
+      const sql = 'INSERT INTO `user` (`username`, `email`, `password`, `dob`, `phone`, `role`) VALUES (?, ?, ?, ?, ?, ?)';
       
       const [result] = await promisePool.execute(sql, [
         sanitizedUsername, 
         sanitizedEmail, 
         hashedPassword, 
         sanitizedDob, 
-        sanitizedPhone
+        sanitizedPhone,
+        sanitizedRole
       ]);
       
       console.log(`✅ User added successfully: ${sanitizedUsername} (ID: ${result.insertId})`);
@@ -63,6 +65,8 @@ const userController = {
     } catch (error) {
       console.error('❌ Add user error:', error);
       console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      console.error('SQL State:', error.sqlState);
       
       if (error.code === 'ER_DUP_ENTRY') {
         const field = error.message.includes('username') ? 'username' : 'email';
@@ -72,13 +76,26 @@ const userController = {
         });
       }
       
-      const isDevelopment = process.env.NODE_ENV === 'development';
+      // Handle missing column error
+      if (error.code === 'ER_BAD_FIELD_ERROR') {
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Database schema error: ' + error.message
+        });
+      }
+      
+      const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
       
       res.status(500).json({ 
         success: false, 
         message: isDevelopment 
           ? `Database error: ${error.message}` 
-          : 'Failed to add user. Please try again later.'
+          : 'Failed to add user. Please try again later.',
+        ...(isDevelopment && {
+          errorCode: error.code,
+          sqlState: error.sqlState,
+          sqlMessage: error.sqlMessage
+        })
       });
     }
   },
